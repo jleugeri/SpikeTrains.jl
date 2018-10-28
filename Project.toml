@@ -1,0 +1,14 @@
+name = "SpikeTrains"
+uuid = "871537dc-dabc-11e8-3764-b5b4a2c99948"
+authors = ["jleugeri <jleugeri@uos.de>"]
+version = "0.1.0"
+
+
+[deps]
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+
+[extras]
+
+[targets]
+#test = ["Plots"]
