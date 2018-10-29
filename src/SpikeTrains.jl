@@ -1,6 +1,6 @@
 module SpikeTrains
 
-export SpikeTrain, draw_uncorrelated_spikes, draw_correlated_spikes, length, iterate, convert, vcat, merge, make_exponentialShift!, correlation_code, plot_spike_trains
+export SpikeTrain, draw_uncorrelated_spikes, draw_correlated_spikes, length, iterate, convert, vcat, merge, make_exponentialShift, correlation_code, plot_spike_trains
 
 using Distributions, Plots#, PlotRecipes
 
@@ -33,7 +33,7 @@ function draw_uncorrelated_spikes(trange, rates; sorted=true)
     return source
 end
 
-make_exponentialShift!(τ) = t -> t+rand(Exponential(τ))
+make_exponentialShift(τ) = t -> t+rand(Exponential(τ))
 
 """
     draw_correlated_spikes(trange, rates, c, τ=1.0)
@@ -45,7 +45,7 @@ is the offline version of the mixture process (4.6.1) by Brette 2008 [1].
 
 [1](http://romainbrette.fr/WordPress3/wp-content/uploads/2014/06/Brette2008NC.pdf)
 """
-function draw_correlated_spikes(trange, rates, c, shift! = make_exponentialShift!(1.0); sorted=true)
+function draw_correlated_spikes(trange, rates, c, shift = make_exponentialShift(1.0); sorted=true)
     if c≈0.0
         return draw_uncorrelated_spikes(trange, rates; sorted=sorted)
     end
@@ -67,7 +67,7 @@ function draw_correlated_spikes(trange, rates, c, shift! = make_exponentialShift
         end
 
         # shift each value randomly
-        foreach(shift!, t.times)
+        t.times .= shift.(t.times)
 
         if sorted
             sort!(t.times)
