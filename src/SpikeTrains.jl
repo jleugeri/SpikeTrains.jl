@@ -1,6 +1,6 @@
 module SpikeTrains
 
-export SpikeTrain, draw_uncorrelated_spikes, draw_correlated_spikes, length, iterate, convert, vcat, merge, make_exponentialShift, correlation_code, plot_spike_trains
+export SpikeTrain, draw_uncorrelated_spikes, draw_correlated_spikes, draw_coincident_spikes, length, iterate, convert, vcat, merge, make_exponentialShift, correlation_code, coincidence_code, plot_spike_trains
 
 using Distributions, Plots#, PlotRecipes
 
@@ -16,7 +16,11 @@ Base.convert(SpikeTrain, v) = SpikeTrain(v)
 Base.vcat(s::SpikeTrain...) = SpikeTrain(vcat(getfield.(s,:times)...))
 Base.merge(s::Array{SpikeTrain}; dims=Base.OneTo(ndims(s))) = dropdims(mapslices(x->vcat(x...), s, dims=dims), dims=dims)
 
-
+"""
+    draw_uncorrelated_spikes(trange, rates; sorted=true)
+    
+Draw uncorrelated spike trains in the interval `trange` with the respective `rates`.
+"""
 function draw_uncorrelated_spikes(trange, rates; sorted=true)
     duration = trange[2]-trange[1]
     source = Vector{SpikeTrain}(undef, length(rates))
@@ -77,15 +81,37 @@ function draw_correlated_spikes(trange, rates, c, shift = make_exponentialShift(
     return target
 end
 
+"""
+    draw_coincident_spikes(trange, num_spikes, p=ones(Float64,1), shift = make_exponentialShift(1.0); sorted=true)
 
-function plot_spike_trains(spiketrains::Array{SpikeTrain}, colors=fill(:auto, length(spiketrains)), plt=plot())
-    for (i,(spiketrain, color)) ∈ enumerate(zip(spiketrains, colors))
-        plot!(plt, ([spiketrain.times spiketrain.times fill(NaN, length(spiketrain.times))])'[:], i .- 0.5 .+ ([zeros(length(spiketrain.times)) ones(length(spiketrain.times)) fill(NaN, length(spiketrain.times))])'[:], lc=color)
+Draws `num_spikes` Poisson spikes in the interval `trange`, each of which appears 
+in each spike-train `i` with the respective probability `p[i]`.
+"""
+function draw_coincident_spikes(trange, num_spikes, p=ones(Float64,1), shift = make_exponentialShift(1.0); sorted=true)
+    times = rand(num_spikes).*(trange[2]-trange[1]).+trange[1]
+    
+    if sorted
+        sort!(times)
     end
-    return plt
+    
+    target = Vector{SpikeTrain}(undef, length(p))
+    for i ∈ eachindex(target)
+        n = rand(Binomial(num_spikes, p[i]))
+        target[i] = SpikeTrain(sample(times, n; replace=false))
+    end
+    
+    return target
 end
 
-function correlation_code(trange, stimulus, rates, correlations)
+"""
+    correlation_code(trange, stimulus, rates, correlations; kwargs...)
+
+Each slice `stimulus[:,...,:,i]` contains an array indicating the class that the
+spike-train with corresponding index represents in the time interval `trange[i:i+1]`.
+Each class `c` results in spike-trains with rate `rates[c]` and mutual pairwise
+correlation `correlations[c]`.
+"""
+function correlation_code(trange, stimulus, rates, correlations; kwargs...)
     @assert length(trange)-1 == size(stimulus)[end] "trange must include n+1 steps for stimuli with last dimension n"
     spiketrains = Array{SpikeTrain}(undef, size(stimulus))
     classes = unique(stimulus)
@@ -93,11 +119,47 @@ function correlation_code(trange, stimulus, rates, correlations)
     for c ∈ classes
         for i ∈ Base.OneTo(length(trange)-1)
             idx = findall(s->c==s, view(stimulus, fill(Colon(), ndims(stimulus)-1)...,i))
-            spiketrains[idx,i] = draw_correlated_spikes(trange[i:i+1], fill(rates[c], length(idx)), correlations[c])
+            spiketrains[idx,i] = draw_correlated_spikes(trange[i:i+1], fill(rates[c], length(idx)), correlations[c]; kwargs...)
         end
     end
 
     return spiketrains
+end
+
+"""
+    coincidence_code(trange, stimulus, background_rate, p; kwargs...)
+    
+Each slice `stimulus[:,...,:,i]` contains a boolean array corresponding to 
+whether or not a spike train with corresponding index participates or not
+in the coincident spiking during the time interval `trange[i:i+1]`. 
+A single spike is drawn within each interval, that appears with probability `p`
+in each of the spike  trains for which the corresponding entry in `stimulus` is `true`.
+In addition to the signal spike for each interval, uncorrelated poisson spike-trains,
+drawn with a given `background_rate`, are added as background noise.
+"""
+function coincidence_code(trange, stimulus, background_rate, p; kwargs...)
+    @assert length(trange)-1 == size(stimulus)[end] "trange must include n+1 steps for stimuli with last dimension n"
+    spiketrains = reshape(draw_uncorrelated_spikes((trange[1],trange[end]), fill(background_rate, length(stimulus))), size(stimulus))
+    
+    for i ∈ Base.OneTo(length(trange)-1)
+        idx = findall(view(stimulus, fill(Colon(), ndims(stimulus)-1)...,i))
+        nd = ndims(idx)+1
+        spiketrains[idx,i] = merge(cat(spiketrains[idx,i], draw_coincident_spikes(trange[i:i+1], 1, fill(p, length(idx)); kwargs...), dims=nd),dims=nd)
+    end
+    
+    return spiketrains
+end
+
+"""
+    plot_spike_trains(spiketrains::Array{SpikeTrain}, colors=fill(:auto, length(spiketrains)), plt=plot(); kwargs...)
+    
+Draw an array of `spiketrains` with given `colors` within a single given or new plot `plt`.
+"""
+function plot_spike_trains(spiketrains::Array{SpikeTrain}, colors=fill(:auto, length(spiketrains)), plt=plot(); kwargs...)
+    for (i,(spiketrain, color)) ∈ enumerate(zip(spiketrains, colors))
+        plot!(plt, ([spiketrain.times spiketrain.times fill(NaN, length(spiketrain.times))])'[:], i .- 0.5 .+ ([zeros(length(spiketrain.times)) ones(length(spiketrain.times)) fill(NaN, length(spiketrain.times))])'[:], lc=color; kwargs...)
+    end
+    return plt
 end
 
 end
