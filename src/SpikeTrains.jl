@@ -16,22 +16,36 @@ Base.convert(SpikeTrain, v) = SpikeTrain(v)
 Base.vcat(s::SpikeTrain...) = SpikeTrain(vcat(getfield.(s,:times)...))
 Base.merge(s::Array{SpikeTrain}; dims=Base.OneTo(ndims(s))) = dropdims(mapslices(x->vcat(x...), s, dims=dims), dims=dims)
 
+function has_min_distance(times, min_distance)
+    keep = ones(Bool, length(times))
+    last_time = -Inf
+    for (i,t) ∈ enumerate(times)
+        if t < last_time
+            keep[i] = false
+        else
+            last_time = t+min_distance
+        end
+    end
+    return keep
+end
+
+ensure_min_distance(times, min_distance) = times[has_min_distance(times, min_distance)]
+    
 """
     draw_uncorrelated_spikes(trange, rates; sorted=true)
     
 Draw uncorrelated spike trains in the interval `trange` with the respective `rates`.
 """
-function draw_uncorrelated_spikes(trange, rates; sorted=true)
+function draw_uncorrelated_spikes(trange, rates)
     duration = trange[2]-trange[1]
     source = Vector{SpikeTrain}(undef, length(rates))
     # draw uncorrelated spike trains with high rate
     for (i,r) ∈ enumerate(rates)
         num_spikes = rand(Poisson(duration*r))
         spikes = rand(num_spikes).*duration.+trange[1]
-        if sorted
-            sort!(spikes)
-        end
-        source[i] = SpikeTrain(spikes)
+        sort!(spikes)
+
+        source[i] = SpikeTrain(spikes,min_distance)
     end
 
     return source
@@ -49,36 +63,49 @@ is the offline version of the mixture process (4.6.1) by Brette 2008 [1].
 
 [1](http://romainbrette.fr/WordPress3/wp-content/uploads/2014/06/Brette2008NC.pdf)
 """
-function draw_correlated_spikes(trange, rates, c, shift = make_exponentialShift(1.0); sorted=true)
-    if c≈0.0
-        return draw_uncorrelated_spikes(trange, rates; sorted=sorted)
-    end
+function draw_correlated_spikes(trange, rates, c, shift = make_exponentialShift(1.0); min_master_distance=-0)
+    return if c≈0.0
+        draw_uncorrelated_spikes(trange, rates)
+    else
+        v = 1/c * mean(rates.^2)/sum(rates)
+        p = (c/mean(rates.^2)) .* (rates * rates')
 
-    v = 1/c * mean(rates.^2)/sum(rates)
-    p = (c/mean(rates.^2)) .* (rates * rates')
+        @assert all(0 .<= p .<= 1) "P not all valid probabilities."
 
-    @assert all(0 .<= p .<= 1) "P not all valid probabilities."
+        source = draw_uncorrelated_spikes(trange, fill(v, length(rates)))
+        target = Vector{SpikeTrain}(undef, length(rates))
 
-    source = draw_uncorrelated_spikes(trange, fill(v, length(rates)), sorted=false)
-    target = Vector{SpikeTrain}(undef, length(rates))
-
-    # draw correlated spike trains
-    for i ∈ eachindex(target)
-        t = target[i] = SpikeTrain()
-        for (k,s) ∈ enumerate(source)
-            num_spikes = rand(Binomial(length(s.times), p[i,k]))
-            append!(t.times, sample(s.times, num_spikes; replace=false))
+        # ensure minimum distance between all source spike trains
+        if min_master_distance > 0
+            n = sum(length, source)
+            times = Vector{Float64}(undef, n)
+            sources = Vector{Int}(undef, n)
+            i = 1
+            for (s,spikes) ∈ enumerate(source)
+                inew = i+length(spikes)
+                times[i:inew] = spikes.times
+                sources[i:inew] .= s
+                i=inew 
+            end
+            keep=has_min_distance(times, min_master_distance)
+            for (s,spikes) ∈ enumerate(source)
+                source[s] = spikes[sources.==s .& keep]
+            end
         end
 
-        # shift each value randomly
-        t.times .= shift.(t.times)
+        # draw correlated spike trains
+        for i ∈ eachindex(target)
+            t = target[i] = SpikeTrain()
+            for (k,s) ∈ enumerate(source)
+                num_spikes = rand(Binomial(length(s.times), p[i,k]))
+                append!(t.times, sample(s.times, num_spikes; replace=false))
+            end
 
-        if sorted
-            sort!(t.times)
+            # shift each value randomly
+            t.times .= shift.(t.times)
         end
+        target
     end
-
-    return target
 end
 
 """
