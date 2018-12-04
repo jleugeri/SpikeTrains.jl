@@ -83,8 +83,8 @@ function draw_correlated_spikes(trange, rates, c, shift = make_exponentialShift(
             i = 1
             for (s,spikes) ∈ enumerate(source)
                 inew = i+length(spikes)
-                times[i:inew] = spikes.times
-                sources[i:inew] .= s
+                times[i:inew-1] = spikes.times
+                sources[i:inew-1] .= s
                 i=inew 
             end
             keep=has_min_distance(times, min_master_distance)
