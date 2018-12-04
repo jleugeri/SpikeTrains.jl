@@ -45,7 +45,7 @@ function draw_uncorrelated_spikes(trange, rates)
         spikes = rand(num_spikes).*duration.+trange[1]
         sort!(spikes)
 
-        source[i] = SpikeTrain(spikes,min_distance)
+        source[i] = SpikeTrain(spikes)
     end
 
     return source
