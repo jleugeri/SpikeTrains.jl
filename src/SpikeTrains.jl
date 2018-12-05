@@ -54,53 +54,83 @@ end
 make_exponentialShift(τ) = t -> t+rand(Exponential(τ))
 
 """
-    draw_correlated_spikes(trange, rates, c, τ=1.0)
+    draw_correlated_spikes(trange, rates, c, [shift]; min_master_distance=0)
 
 Draws spike trains with given `rates` within the given time interval `trange` and
-pairwise correlation coefficients c. Exponential noise is added to result in an
-exponential cross correlation with time constant `τ`. The algorithm implemented
+pairwise correlation coefficients c. A function to `shift` the drawn spikes can be
+included. A minimum distance between master spikes can be required. The algorithm implemented
 is the offline version of the mixture process (4.6.1) by Brette 2008 [1].
 
 [1](http://romainbrette.fr/WordPress3/wp-content/uploads/2014/06/Brette2008NC.pdf)
+
+E[wt] = E[n_good]*min_master_distance
+P(n_good|E[wt]) = Poisson(n_good|rate*(1-E[n_good]*min_master_distance))
+E[n_good] = rate*1-rate*E[n_good]*min_master_distance
+E[n_good] = rate/(1+rate*min_master_distance) = 1/(1/rate+min_master_distance)
+
+rate_desired =!= E[n_good] = 1/(1/rate+min_master_distance)
+=> rate := rate_desired/(1-rate_desired*min_master_distance)
 """
 function draw_correlated_spikes(trange, rates, c, shift = make_exponentialShift(1.0); min_master_distance=-0)
-    return if c≈0.0
+    # correct the rates to account for the expected loss due to pruning overlapping spikes
+    frac_overlap = sum(rates)
+    
+    # draw the uncorrelated source spiketrains
+    source = if c≈0.0
+        @assert all(0 .<= rates*min_master_distance .< 1) "Cannot draw $(maximum(rates)) master spikes per unit-time with $(min_master_distance) minimum distance (rates must sum to < $(1/min_master_distance))."
+            
+        # correct sampling rate for expected loss of master spikes due to enforced minimum distance
+        rates .= rates./(1 .- rates.*min_master_distance)
         draw_uncorrelated_spikes(trange, rates)
     else
+        # determine master spike sampling rate
         v = 1/c * mean(rates.^2)/sum(rates)
+        @assert 0<=length(rates)*v*min_master_distance<1 "Cannot draw ~$(length(rates)*v) master spikes per unit-time with $(min_master_distance) minimum distance (rates must sum to < $(1/min_master_distance))."
+        
+        # correct sampling rate for expected loss of master spikes due to enforced minimum distance
+        v /= (1-length(rates)*v*min_master_distance)
+        
+        # determine subsampling probability
         p = (c/mean(rates.^2)) .* (rates * rates')
-
         @assert all(0 .<= p .<= 1) "P not all valid probabilities."
 
-        source = draw_uncorrelated_spikes(trange, fill(v, length(rates)))
-        target = Vector{SpikeTrain}(undef, length(rates))
+        
 
-        # ensure minimum distance between all source spike trains
-        if min_master_distance > 0
-            n = sum(length, source)
-            times = Vector{Float64}(undef, n)
-            sources = Vector{Int}(undef, n)
-            i = 1
-            for (s,spikes) ∈ enumerate(source)
-                inew = i+length(spikes)
-                times[i:inew-1] = spikes.times
-                sources[i:inew-1] .= s
-                i=inew 
-            end
-            
-            # sort times and corresponding sources
-            idx=sortperm(times)
-            times=times[idx]
-            sources=sources[idx]
-            
-            # determine which spikes to keep ...
-            keep=has_min_distance(times, min_master_distance)
-            
-            # ... and keep only those spikes for the respective source
-            for (s,spikes) ∈ enumerate(source)
-                source[s] = SpikeTrain(times[(sources.==s) .& keep])
-            end
+        draw_uncorrelated_spikes(trange, fill(v, length(rates)))
+    end
+    
+    # ensure minimum distance between all source spike trains
+    if min_master_distance > 0
+        
+        n = sum(length, source)
+        times = Vector{Float64}(undef, n)
+        sources = Vector{Int}(undef, n)
+        i = 1
+        for (s,spikes) ∈ enumerate(source)
+            inew = i+length(spikes)
+            times[i:inew-1] = spikes.times
+            sources[i:inew-1] .= s
+            i=inew 
         end
+        
+        # sort times and corresponding sources
+        idx=sortperm(times)
+        times=times[idx]
+        sources=sources[idx]
+        
+        # determine which spikes to keep ...
+        keep=has_min_distance(times, min_master_distance)
+        
+        # ... and keep only those spikes for the respective source
+        for (s,spikes) ∈ enumerate(source)
+            source[s] = SpikeTrain(times[(sources.==s) .& keep])
+        end
+    end
+    
+    if c≈0.0
+        return source
+    else
+        target = Vector{SpikeTrain}(undef, length(rates))
 
         # draw correlated spike trains
         for i ∈ eachindex(target)
@@ -115,7 +145,7 @@ function draw_correlated_spikes(trange, rates, c, shift = make_exponentialShift(
             
             sort!(t.times)
         end
-        target
+        return target
     end
 end
 
