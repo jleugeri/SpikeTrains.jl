@@ -87,9 +87,18 @@ function draw_correlated_spikes(trange, rates, c, shift = make_exponentialShift(
                 sources[i:inew-1] .= s
                 i=inew 
             end
+            
+            # sort times and corresponding sources
+            idx=sortperm(times)
+            times=times[idx]
+            sources=sources[idx]
+            
+            # determine which spikes to keep ...
             keep=has_min_distance(times, min_master_distance)
+            
+            # ... and keep only those spikes for the respective source
             for (s,spikes) ∈ enumerate(source)
-                source[s] = SpikeTrain(times[sources.==s .& keep])
+                source[s] = SpikeTrain(times[(sources.==s) .& keep])
             end
         end
 
@@ -103,6 +112,8 @@ function draw_correlated_spikes(trange, rates, c, shift = make_exponentialShift(
 
             # shift each value randomly
             t.times .= shift.(t.times)
+            
+            sort!(t.times)
         end
         target
     end
